@@ -3,6 +3,10 @@ import random
 SETTINGS = {
     "RPC_URL": "https://lisk.drpc.org",
     "CHAIN_ID": 1135,
+    "BETWEEN_START_WALLETS": {
+            "MIN": 10,
+            "MAX": 90
+        },
 
     "MAX_THREADS": 5,
     "DELAYS": {

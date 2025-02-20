@@ -30,13 +30,13 @@ class DeFiBot:
 
         # Инициализация модулей
         self.modules = [
-            # DmailModule(),
+            DmailModule(),
             RelayBridge(),
-            # IonicModule(),
-            # SafeModule(),
-            # JumperModule(),
-            # LayerSwapModule(),
-            # SuperBridgeModule()
+            IonicModule(),
+            SafeModule(),
+            JumperModule(),
+            LayerSwapModule(),
+            SuperBridgeModule()
         ]
 
     def get_wallet_number(self) -> int:
@@ -46,6 +46,9 @@ class DeFiBot:
 
     def process_wallet(self, wallet):
         try:
+            time.sleep(
+               random.randint(SETTINGS['BETWEEN_START_WALLETS']['MIN'], SETTINGS['BETWEEN_START_WALLETS']['MAX']))
+
             wallet_number = self.get_wallet_number()
             contracts_to_process = wallet.contracts_count
 
@@ -157,7 +160,7 @@ class DeFiBot:
                 logger.error("No wallets loaded")
                 return
 
-            logger.info(f"Starting process with {len(wallets)} wallets")
+            logger.info(f"Starting process with {len(wallets)} wallets. Wait...")
 
             with ThreadPoolExecutor(max_workers=SETTINGS["MAX_THREADS"]) as executor:
                 futures = [
