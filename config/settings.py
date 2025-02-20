@@ -1,3 +1,5 @@
+import random
+
 SETTINGS = {
     "RPC_URL": "https://lisk.drpc.org",
     "CHAIN_ID": 1135,
@@ -29,12 +31,12 @@ SETTINGS = {
     },
 
     "RELAY_BRIDGE": {
-        "AMOUNT": {
+        "AMOUNT_PERCENTAGE": {
             "MIN": 0.01,
             "MAX": 0.01
         },
         "SLIPPAGE": "",
-        "GAS_LIMIT": 500000,
+        "GAS_LIMIT": random.randint(500000, 550000),
         "STATUS_CHECK_DELAY": 10,
         "MAX_STATUS_CHECKS": 30
     },

@@ -127,22 +127,21 @@ class RelayBridge(BaseModule):
         return response.json().get("enabled", False)
 
     def _get_quote(self, wallet_address: str, destination_chain: Chain) -> dict:
-        balance = self.w3.eth.get_balance(wallet.address)
-        balance_eth = float(Web3.from_wei(balance, 'ether'))
+        balance = self.w3.eth.get_balance(wallet_address)  # Используем wallet_address вместо wallet.address
 
-        min_amount = balance_eth * self.settings["AMOUNT_PERCENTAGE"]["MIN"]
-        max_amount = balance_eth * self.settings["AMOUNT_PERCENTAGE"]["MAX"]
+        min_amount = balance * self.settings["AMOUNT_PERCENTAGE"]["MIN"]
+        max_amount = balance * self.settings["AMOUNT_PERCENTAGE"]["MAX"]
         amount_to_bridge = random.uniform(min_amount, max_amount)
 
         payload = {
-            "user": wallet_address,
+            "user": wallet_address,  # Используем wallet_address
             "originChainId": API_ENDPOINTS["RELAY"]["ORIGIN_CHAIN_ID"],
             "destinationChainId": destination_chain.id,
             "originCurrency": TOKENS['ETH'],
             "destinationCurrency": destination_chain.currency_address,
-            "recipient": wallet_address,
+            "recipient": wallet_address,  # Используем wallet_address
             "tradeType": "EXACT_INPUT",
-            "amount": str(amount_to_bridge),
+            "amount": str(int(amount_to_bridge)),
             "slippageTolerance": self.settings["SLIPPAGE"],
             "useExternalLiquidity": False
         }

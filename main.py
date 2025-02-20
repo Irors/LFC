@@ -30,13 +30,13 @@ class DeFiBot:
 
         # Инициализация модулей
         self.modules = [
-            DmailModule(),
+            # DmailModule(),
             RelayBridge(),
-            IonicModule(),
-            SafeModule(),
-            JumperModule(),
-            LayerSwapModule(),
-            SuperBridgeModule()
+            # IonicModule(),
+            # SafeModule(),
+            # JumperModule(),
+            # LayerSwapModule(),
+            # SuperBridgeModule()
         ]
 
     def get_wallet_number(self) -> int:
@@ -126,7 +126,7 @@ class DeFiBot:
                     result = module.process_transaction(
                         wallet,
                         destination_chain,
-                        SETTINGS["RELAY_BRIDGE"]["AMOUNT"],
+                        SETTINGS["RELAY_BRIDGE"]["AMOUNT_PERCENTAGE"],
                         wallet_number
                     )
 
@@ -146,7 +146,7 @@ class DeFiBot:
                         time.sleep(delay)
 
         except Exception as e:
-            logger.error(f"[Account #{wallet_number}] Error processing wallet {wallet.address}: {str(e)}")
+           logger.error(f"[Account #{wallet_number}] Error processing wallet {wallet.address}: {str(e)}")
 
     def run(self):
         try:
