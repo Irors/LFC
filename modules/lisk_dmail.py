@@ -28,7 +28,7 @@ class DmailModule(BaseModule):
         fake = Faker()
         return fake.text()
 
-    def get_available_chains(self):
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None):
         return [
             Chain(
                 id=SETTINGS["CHAIN_ID"],

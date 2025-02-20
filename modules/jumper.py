@@ -13,23 +13,20 @@ class JumperModule(BaseModule):
         super().__init__()
         self.w3 = Web3(Web3.HTTPProvider(SETTINGS["RPC_URL"]))
         self.settings = SETTINGS["JUMPER"]
-        self.data = None
-        self.value = None
         self.headers = {
             'x-lifi-integrator': 'jumper.exchange',
             'x-lifi-sdk': '3.1.3',
             'x-lifi-widget': '3.2.2',
         }
 
-    def get_available_chains(self) -> list[Chain]:
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None) -> list[Chain]:
         try:
-            # log_status(0, "Getting available chains for Jumper")
-            # Получаем доступные маршруты
+            log_status(wallet_number or 0, "Getting available chains for Jumper")
             headers = {
                 'Referer': 'https://jumper.exchange/',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
-            routes_response = requests.get('https://api.jumper.exchange/p/lifi/tools', headers=headers)
+            routes_response = requests.get('https://api.jumper.exchange/p/lifi/tools', headers=headers, proxies=proxy)
             routes_data = routes_response.json()
 
             # Собираем chain_ids
@@ -44,8 +41,7 @@ class JumperModule(BaseModule):
             available_chains = []
             for chain_id in available_chain_ids:
                 if chain_id != 1:
-                    # Получаем информацию о сети через Chainlist API
-                    chain_info_response = requests.get(f'https://chainid.network/chains.json')
+                    chain_info_response = requests.get(f'https://chainid.network/chains.json', proxies=proxy)
                     chains_data = chain_info_response.json()
 
                     chain_info = next((chain for chain in chains_data if chain["chainId"] == chain_id), None)
@@ -65,7 +61,8 @@ class JumperModule(BaseModule):
             return available_chains
 
         except Exception as e:
-            log_transaction_error(0, f"Error getting available chains: {str(e)}", "Jumper initialization")
+            log_transaction_error(wallet_number or 0, f"Error getting available chains: {str(e)}",
+                                  "Jumper initialization")
             return []
 
     def validate_balance(self, wallet: Wallet, wallet_number: int):

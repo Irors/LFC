@@ -15,6 +15,6 @@ class BaseModule(ABC):
         pass
 
     @abstractmethod
-    def get_available_chains(self) -> List[Chain]:
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None) -> List[Chain]:
         """Get list of chains supported by this module"""
         pass

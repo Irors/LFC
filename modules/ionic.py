@@ -13,13 +13,13 @@ class IonicModule(BaseModule):
         self.w3 = Web3(Web3.HTTPProvider(RPC_URL))
         self.settings = SETTINGS["IONIC"]
 
-    def get_available_chains(self):
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None):
         return [
             Chain(
                 id=CHAIN_ID_LISK,
                 name="Lisk",
                 rpc_url=RPC_URL,
-                currency_address=TOKENS["ETH"],
+                currency_address=TOKENS['ETH'],
                 is_enabled=True,
                 supports_deposits=True
             )

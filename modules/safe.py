@@ -17,7 +17,7 @@ class SafeModule(BaseModule):
             abi=CONTRACT_ADDRESSES['SAFE']['ABI']
         )
 
-    def get_available_chains(self):
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None):
         return [
             Chain(
                 id=CHAIN_ID_LISK,

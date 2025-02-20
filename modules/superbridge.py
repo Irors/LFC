@@ -21,14 +21,12 @@ class SuperBridgeModule(BaseModule):
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
 
-    def get_chain_info(self) -> dict:
-        """Получение информации о всех сетях через Chainlist API"""
+    def get_chain_info(self, wallet_number: int, proxy: dict) -> dict:
         try:
-            log_status(0, "Getting chain information for SuperBridge")
-            response = requests.get('https://chainid.network/chains.json')
+            log_status(wallet_number, "Getting chain information for SuperBridge")
+            response = requests.get('https://chainid.network/chains.json', proxies=proxy)
             if response.status_code == 200:
                 chains_data = response.json()
-                # Создаем словарь chain_id -> chain_info
                 return {
                     chain['chainId']: {
                         'rpc': chain.get('rpc', [])[0] if chain.get('rpc') else None,
@@ -39,23 +37,24 @@ class SuperBridgeModule(BaseModule):
                 }
             return {}
         except Exception as e:
-            log_transaction_error(0, f"Failed to get chains info: {e}", "SuperBridge initialization")
+            log_transaction_error(wallet_number, f"Failed to get chains info: {e}", "SuperBridge initialization")
             return {}
 
-    def get_gas_price(self, chain_id: int) -> str:
+    def get_gas_price(self, chain_id: int, wallet_number: int, proxy: dict) -> str:
         """Получение gas price в сети назначения"""
         try:
-            chains_info = self.get_chain_info()
+            chains_info = self.get_chain_info(wallet_number, proxy)
             if chain_id in chains_info and chains_info[chain_id]['rpc']:
                 w3 = Web3(Web3.HTTPProvider(chains_info[chain_id]['rpc']))
                 gas_price = w3.eth.gas_price
                 return str(gas_price)
         except Exception as e:
-            log_transaction_error(0, f"Failed to get gas price for chain {chain_id}: {e}", "SuperBridge gas check")
+            log_transaction_error(wallet_number, f"Failed to get gas price for chain {chain_id}: {e}", "SuperBridge gas check")
 
         return "3294362"  # дефолтное значение
 
-    def get_bridge_data(self, wallet: str, destination_chain_id: int, amount_wei: int, wallet_number: int) -> dict:
+    def get_bridge_data(self, wallet: str, destination_chain_id: int, amount_wei: int, wallet_number: int,
+                        proxy: dict) -> dict:
         """Получение данных для бриджа"""
         log_status(wallet_number, f"Getting SuperBridge route data for chain ID {destination_chain_id}")
 
@@ -69,7 +68,7 @@ class SuperBridgeModule(BaseModule):
             "fromTokenDecimals": 18,
             "toTokenDecimals": 18,
             "fromGasPrice": str(self.w3.eth.gas_price),
-            "toGasPrice": self.get_gas_price(destination_chain_id),
+            "toGasPrice": self.get_gas_price(destination_chain_id, wallet_number, proxy),
             "graffiti": "superbridge",
             "recipient": wallet,
             "sender": wallet,
@@ -79,13 +78,17 @@ class SuperBridgeModule(BaseModule):
         response = requests.post(
             'https://api.superbridge.app/api/v2/bridge/routes',
             headers=self.headers,
-            json=payload
+            json=payload,
+            proxies=proxy
         )
+
+        if response.status_code != 200:
+            raise Exception(f"Failed to get bridge routes: {response.text}")
 
         data = response.json()
 
         # Проверяем на ошибку AmountTooSmall
-        if response.status_code != 200 or "AmountTooSmall" in str(data):
+        if "AmountTooSmall" in str(data):
             amount_eth = Web3.from_wei(amount_wei, 'ether')
             raise Exception(f"Amount too small: {amount_eth} ETH")
 
@@ -97,6 +100,14 @@ class SuperBridgeModule(BaseModule):
     def process_transaction(self, wallet: Wallet, destination_chain: Chain, amount: dict,
                             wallet_number: int) -> TransactionResult:
         try:
+            # Создаем прокси для запросов
+            proxy = None
+            if wallet.proxy:
+                proxy = {
+                    'http': wallet.proxy.as_url(),
+                    'https': wallet.proxy.as_url()
+                }
+
             log_transaction_start(wallet_number, f"Starting SuperBridge transaction to {destination_chain.name}")
 
             # Проверяем баланс
@@ -117,7 +128,8 @@ class SuperBridgeModule(BaseModule):
             )
 
             # Получаем данные для транзакции
-            bridge_data = self.get_bridge_data(wallet.address, destination_chain.id, amount_in_wei, wallet_number)
+            bridge_data = self.get_bridge_data(wallet.address, destination_chain.id, amount_in_wei, wallet_number,
+                                               proxy)
             tx_data = bridge_data["initiatingTransaction"]
 
             log_status(wallet_number, "Preparing SuperBridge transaction")
@@ -176,11 +188,11 @@ class SuperBridgeModule(BaseModule):
                 module_name=self.module_name
             )
 
-    def get_available_chains(self):
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None):
         """Получение списка доступных сетей для бриджа"""
-        log_status(0, "Getting available chains for SuperBridge")
+        log_status(wallet_number or 0, "Getting available chains for SuperBridge")
         supported_chains = [8453, 10, 34443, 7777777, 130]  # ID поддерживаемых сетей
-        chains_info = self.get_chain_info()
+        chains_info = self.get_chain_info(wallet_number, proxy)
 
         available_chains = []
         for chain_id in supported_chains:

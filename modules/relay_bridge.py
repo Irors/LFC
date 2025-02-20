@@ -18,8 +18,8 @@ class RelayBridge(BaseModule):
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
 
-    def get_available_chains(self) -> List[Chain]:
-        response = self.session.get(API_ENDPOINTS["RELAY"]["CHAINS"])
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None) -> List[Chain]:
+        response = self.session.get(API_ENDPOINTS["RELAY"]["CHAINS"], proxies=proxy)
         data = response.json()
 
         chains = []
@@ -75,15 +75,22 @@ class RelayBridge(BaseModule):
     def process_transaction(self, wallet: Wallet, destination_chain: Chain, amount: dict,
                             wallet_number: int) -> TransactionResult:
         try:
+            proxy = None
+            if wallet.proxy:
+                proxy = {
+                    'http': wallet.proxy.as_url(),
+                    'https': wallet.proxy.as_url()
+                }
+
             log_transaction_start(wallet_number, f"Checking Relay bridge availability for {destination_chain.name}")
 
-            if not self._check_chain_config(destination_chain.id):
+            if not self._check_chain_config(destination_chain.id, wallet_number, proxy):
                 log_transaction_error(wallet_number, f"Bridge to {destination_chain.name} unavailable", "Relay bridge")
                 return TransactionResult(False, error_message=f"Bridge to {destination_chain.name} unavailable")
 
             log_status(wallet_number, f"Getting quote for {destination_chain.name}")
 
-            quote_data = self._get_quote(wallet.address, destination_chain)
+            quote_data = self._get_quote(wallet.address, destination_chain, wallet_number, proxy)
 
             if "errorCode" in quote_data:
                 error_msg = quote_data.get("message", "Unknown error")
@@ -112,38 +119,39 @@ class RelayBridge(BaseModule):
             log_transaction_error(wallet_number, error_message, "Relay bridge transaction")
             return TransactionResult(False, error_message=error_message, module_name=self.module_name)
 
-    def _check_transaction_status(self, request_id: str) -> dict:
+    def _check_transaction_status(self, request_id: str, wallet_number: int = None, proxy: dict = None) -> dict:
         """Проверка статуса транзакции"""
         params = {"requestId": request_id}
-        response = self.session.get(API_ENDPOINTS["RELAY"]["STATUS"], params=params)
+        response = self.session.get(API_ENDPOINTS["RELAY"]["STATUS"], params=params, proxies=proxy)
         return response.json()
 
-    def _check_chain_config(self, destination_chain_id: int) -> bool:
+    def _check_chain_config(self, destination_chain_id: int, wallet_number: int = None, proxy: dict = None) -> bool:
         params = {
             "originChainId": str(API_ENDPOINTS["RELAY"]["ORIGIN_CHAIN_ID"]),
             "destinationChainId": str(destination_chain_id)
         }
-        response = self.session.get(API_ENDPOINTS["RELAY"]["CONFIG"], params=params)
+        response = self.session.get(API_ENDPOINTS["RELAY"]["CONFIG"], params=params, proxies=proxy)
         return response.json().get("enabled", False)
 
-    def _get_quote(self, wallet_address: str, destination_chain: Chain) -> dict:
-        balance = self.w3.eth.get_balance(wallet_address)  # Используем wallet_address вместо wallet.address
+    def _get_quote(self, wallet_address: str, destination_chain: Chain, wallet_number: int = None,
+                   proxy: dict = None) -> dict:
+        balance = self.w3.eth.get_balance(wallet_address)
 
         min_amount = balance * self.settings["AMOUNT_PERCENTAGE"]["MIN"]
         max_amount = balance * self.settings["AMOUNT_PERCENTAGE"]["MAX"]
         amount_to_bridge = random.uniform(min_amount, max_amount)
 
         payload = {
-            "user": wallet_address,  # Используем wallet_address
+            "user": wallet_address,
             "originChainId": API_ENDPOINTS["RELAY"]["ORIGIN_CHAIN_ID"],
             "destinationChainId": destination_chain.id,
             "originCurrency": TOKENS['ETH'],
             "destinationCurrency": destination_chain.currency_address,
-            "recipient": wallet_address,  # Используем wallet_address
+            "recipient": wallet_address,
             "tradeType": "EXACT_INPUT",
-            "amount": str(int(amount_to_bridge)),
+            "amount": int(amount_to_bridge),
             "slippageTolerance": self.settings["SLIPPAGE"],
             "useExternalLiquidity": False
         }
-        response = self.session.post(API_ENDPOINTS["RELAY"]["QUOTE"], json=payload)
+        response = self.session.post(API_ENDPOINTS["RELAY"]["QUOTE"], json=payload, proxies=None)
         return response.json()

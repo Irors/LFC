@@ -16,13 +16,12 @@ class LayerSwapModule(BaseModule):
         self.headers = {"X-LS-APIKEY": self.settings["API_KEY"]}
         self.networks = self.settings["TO_CHAIN"]
 
-    def get_available_chains(self):
-        """Получение списка доступных сетей для бриджа"""
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None):
         available_chains = []
         source = self.networks.get(self.settings["FROM_NETWORK"].lower())
 
         if not source:
-            log_transaction_error(0, f"Network {self.settings['FROM_NETWORK']} not supported")
+            log_transaction_error(wallet_number or 0, f"Network {self.settings['FROM_NETWORK']} not supported")
             return []
 
         for network_name in self.networks:
@@ -39,7 +38,8 @@ class LayerSwapModule(BaseModule):
             try:
                 response = requests.get(
                     "https://api.layerswap.io/api/available_routes",
-                    params=params
+                    params=params,
+                    proxies=proxy
                 )
 
                 if response.status_code == 200:
@@ -57,7 +57,7 @@ class LayerSwapModule(BaseModule):
                         )
 
             except Exception as e:
-                log_transaction_error(0, f"Error checking route for {network_name}: {str(e)}")
+                log_transaction_error(wallet_number or 0, f"Error checking route for {network_name}: {str(e)}")
 
         return available_chains
 

@@ -46,11 +46,16 @@ class DeFiBot:
 
     def process_wallet(self, wallet):
         try:
-            time.sleep(
-               random.randint(SETTINGS['BETWEEN_START_WALLETS']['MIN'], SETTINGS['BETWEEN_START_WALLETS']['MAX']))
-
             wallet_number = self.get_wallet_number()
             contracts_to_process = wallet.contracts_count
+
+            # Создаем прокси для всех запросов
+            proxy = None
+            if wallet.proxy:
+                proxy = {
+                    'http': wallet.proxy.as_url(),
+                    'https': wallet.proxy.as_url()
+                }
 
             logger.info(f"[Account #{wallet_number}] Planning to process {contracts_to_process} contracts")
 
@@ -58,15 +63,6 @@ class DeFiBot:
             weth_result = self.weth_module.check_and_withdraw_weth(wallet, wallet_number)
             if not weth_result.success:
                 logger.warning(f"[Account #{wallet_number}] Failed to process WETH: {weth_result.error_message}")
-
-            # Добавляем задержку после обработки WETH
-            if weth_result.tx_hash:
-                delay = random.uniform(
-                    SETTINGS["DELAYS"]["BETWEEN_MODULES"]["MIN"],
-                    SETTINGS["DELAYS"]["BETWEEN_MODULES"]["MAX"]
-                )
-                logger.info(f"[Account #{wallet_number}] Waiting {delay:.2f} seconds after WETH processing")
-                time.sleep(delay)
 
             # Добавляем задержку между кошельками
             if wallet_number > 1:
@@ -77,20 +73,18 @@ class DeFiBot:
                 logger.info(f"[Account #{wallet_number}] Waiting {delay:.2f} seconds before processing")
                 time.sleep(delay)
 
-            # Обрабатываем указанное количество контрактов
+            # Обрабатываем контракты
             contracts_processed = 0
             while contracts_processed < contracts_to_process:
-                # Перемешиваем модули для случайного порядка
                 random.shuffle(self.modules)
 
                 for module in self.modules:
                     if contracts_processed >= contracts_to_process:
                         break
 
-                    # Логируем начало работы модуля
                     log_module_start(module.module_name, wallet_number)
 
-                    available_chains = module.get_available_chains()
+                    available_chains = module.get_available_chains(wallet_number, proxy)
 
                     if not available_chains:
                         logger.error(f"[Account #{wallet_number}] No available chains for {module.module_name}")
