@@ -30,13 +30,13 @@ class DeFiBot:
 
         # Инициализация модулей
         self.modules = [
-            # DmailModule(),
+            DmailModule(),
             RelayBridge(),
-            # IonicModule(),
-            # SafeModule(),
-            # JumperModule(),
-            # LayerSwapModule(),
-            # SuperBridgeModule()
+            IonicModule(),
+            SafeModule(),
+            JumperModule(),
+            LayerSwapModule(),
+            SuperBridgeModule()
         ]
 
     def get_wallet_number(self) -> int:
