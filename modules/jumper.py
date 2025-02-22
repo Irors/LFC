@@ -6,11 +6,12 @@ from utils.logger import log_transaction_start, log_transaction_success, log_tra
 import random
 import requests
 from config.constants import *
+from core.nonce_manager import NonceManager
 
 
 class JumperModule(BaseModule):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nonce_manager: NonceManager):
+        super().__init__(nonce_manager)
         self.w3 = Web3(Web3.HTTPProvider(SETTINGS["RPC_URL"]))
         self.settings = SETTINGS["JUMPER"]
         self.headers = {

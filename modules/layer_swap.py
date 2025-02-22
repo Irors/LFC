@@ -1,5 +1,6 @@
 from core.base_module import BaseModule
 from core.wallet_manager import Wallet, Chain, TransactionResult
+from core.nonce_manager import NonceManager
 from config.settings import SETTINGS
 from web3 import Web3
 from utils.logger import log_transaction_start, log_transaction_success, log_transaction_error, log_status
@@ -9,13 +10,105 @@ from config.constants import *
 
 
 class LayerSwapModule(BaseModule):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nonce_manager: NonceManager):
+        super().__init__(nonce_manager)
         self.w3 = Web3(Web3.HTTPProvider(SETTINGS["RPC_URL"]))
         self.settings = SETTINGS["LAYERSWAP"]
         self.headers = {"X-LS-APIKEY": self.settings["API_KEY"]}
         self.networks = self.settings["TO_CHAIN"]
 
+    def process_transaction(self, wallet: Wallet, destination_chain: Chain, amount: dict,
+                            wallet_number: int) -> TransactionResult:
+        try:
+            log_transaction_start(wallet_number, "Checking Layerswap bridge availability")
+
+            balance = self.w3.eth.get_balance(wallet.address)
+            balance_eth = float(Web3.from_wei(balance, 'ether'))
+
+            # Определяем сумму для бриджа
+            min_amount = balance_eth * self.settings["AMOUNT_PERCENTAGE"]["MIN"]
+            max_amount = balance_eth * self.settings["AMOUNT_PERCENTAGE"]["MAX"]
+
+            amount_to_bridge = random.uniform(min_amount, max_amount)
+
+            # Проверяем возможность бриджа
+            if not self.check_swap_rate(
+                    self.settings["FROM_NETWORK"],
+                    destination_chain.name.lower(),
+                    amount_to_bridge
+            ):
+                raise Exception("Bridge amount out of limits")
+
+            log_status(wallet_number, "Getting Layerswap transaction data")
+
+            # Получаем данные для транзакции
+            tx_data = self.create_swap(
+                wallet,
+                self.settings["FROM_NETWORK"],
+                destination_chain.name.lower(),
+                amount_to_bridge
+            )
+
+            # Создаем транзакцию
+            transaction = {
+                "from": wallet.address,
+                "to": self.w3.to_checksum_address(tx_data["to_address"]),
+                "value": Web3.to_wei(amount_to_bridge, 'ether'),
+                "gasPrice": self.w3.eth.gas_price,
+                "chainId": self.w3.eth.chain_id
+            }
+
+            # Получаем nonce через NonceManager
+            transaction = self.prepare_transaction(wallet, transaction)
+
+            # Оценка газа
+            estimated_gas = self.w3.eth.estimate_gas(transaction)
+            transaction["gas"] = int(estimated_gas * 1.5)
+
+            log_status(
+                wallet_number,
+                f"Bridging {amount_to_bridge:.6f} ETH to {destination_chain.name}"
+            )
+
+            try:
+                # Подписываем и отправляем транзакцию
+                signed_tx = self.w3.eth.account.sign_transaction(transaction, wallet.private_key)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+
+                # Ждем подтверждения
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+
+                if receipt["status"] == 1:
+                    log_transaction_success(wallet_number, tx_hash.hex(), "Layerswap bridge transaction")
+                    return TransactionResult(
+                        success=True,
+                        tx_hash=tx_hash.hex(),
+                        module_name=self.module_name
+                    )
+                else:
+                    self.handle_failed_transaction(wallet, transaction)
+                    log_transaction_error(wallet_number, "Transaction failed", "Layerswap bridge transaction")
+                    return TransactionResult(
+                        success=False,
+                        tx_hash=tx_hash.hex(),
+                        error_message="Transaction failed",
+                        module_name=self.module_name
+                    )
+
+            except Exception as e:
+                self.handle_failed_transaction(wallet, transaction)
+                raise e
+
+        except Exception as e:
+            error_message = str(e)
+            log_transaction_error(wallet_number, error_message, "Layerswap bridge transaction")
+            return TransactionResult(
+                success=False,
+                error_message=error_message,
+                module_name=self.module_name
+            )
+
+    # Остальные методы остаются без изменений
     def get_available_chains(self, wallet_number: int = None, proxy: dict = None):
         available_chains = []
         source = self.networks.get(self.settings["FROM_NETWORK"].lower())
@@ -120,100 +213,6 @@ class LayerSwapModule(BaseModule):
             raise Exception("Failed to prepare transaction")
 
         return response.json()["data"]
-
-    def process_transaction(self, wallet: Wallet, destination_chain: Chain, amount: dict,
-                            wallet_number: int) -> TransactionResult:
-        try:
-            log_transaction_start(wallet_number, "Checking Layerswap bridge availability")
-
-            balance = self.w3.eth.get_balance(wallet.address)
-            balance_eth = float(Web3.from_wei(balance, 'ether'))
-
-            # Определяем сумму для бриджа
-            min_amount = balance_eth * self.settings["AMOUNT_PERCENTAGE"]["MIN"]
-            max_amount = balance_eth * self.settings["AMOUNT_PERCENTAGE"]["MAX"]
-
-            amount_to_bridge = random.uniform(min_amount, max_amount)
-
-            # Проверяем возможность бриджа
-            if not self.check_swap_rate(
-                    self.settings["FROM_NETWORK"],
-                    destination_chain.name.lower(),
-                    amount_to_bridge
-            ):
-                raise Exception("Bridge amount out of limits")
-
-            log_status(wallet_number, "Getting Layerswap transaction data")
-
-            # Получаем данные для транзакции
-            tx_data = self.create_swap(
-                wallet,
-                self.settings["FROM_NETWORK"],
-                destination_chain.name.lower(),
-                amount_to_bridge
-            )
-
-            # Создаем транзакцию
-            transaction = {
-                "from": wallet.address,
-                "to": self.w3.to_checksum_address(tx_data["to_address"]),
-                "value": Web3.to_wei(amount_to_bridge, 'ether'),
-                "nonce": self.w3.eth.get_transaction_count(wallet.address),
-                "gasPrice": self.w3.eth.gas_price,
-                "chainId": self.w3.eth.chain_id
-            }
-
-            # Оценка газа
-            estimated_gas = self.w3.eth.estimate_gas(transaction)
-
-            # Проверяем, хватит ли на газ
-            gas_cost = estimated_gas * self.w3.eth.gas_price
-            if balance - Web3.to_wei(amount_to_bridge, 'ether') < gas_cost * 1.5:
-                new_amount = Web3.from_wei(balance - (gas_cost * 2), 'ether')
-                log_status(
-                    wallet_number,
-                    f"Adjusting amount to leave gas: {new_amount:.4f} ETH"
-                )
-                transaction["value"] = Web3.to_wei(new_amount, 'ether')
-
-            transaction["gas"] = int(self.w3.eth.estimate_gas(transaction) * 1.5)
-
-            log_status(
-                wallet_number,
-                f"Bridging {amount_to_bridge:.6f} ETH to {destination_chain.name}"
-            )
-
-            # Подписываем и отправляем транзакцию
-            signed_tx = self.w3.eth.account.sign_transaction(transaction, wallet.private_key)
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-
-            # Ждем подтверждения
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-
-            if receipt["status"] == 1:
-                log_transaction_success(wallet_number, tx_hash.hex(), "Layerswap bridge transaction")
-                return TransactionResult(
-                    success=True,
-                    tx_hash=tx_hash.hex(),
-                    module_name=self.module_name
-                )
-            else:
-                log_transaction_error(wallet_number, "Transaction failed", "Layerswap bridge transaction")
-                return TransactionResult(
-                    success=False,
-                    tx_hash=tx_hash.hex(),
-                    error_message="Transaction failed",
-                    module_name=self.module_name
-                )
-
-        except Exception as e:
-            error_message = str(e)
-            log_transaction_error(wallet_number, error_message, "Layerswap bridge transaction")
-            return TransactionResult(
-                success=False,
-                error_message=error_message,
-                module_name=self.module_name
-            )
 
     def get_chain_id(self, network: str) -> int:
         """Получение chain_id по имени сети"""

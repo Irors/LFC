@@ -1,5 +1,6 @@
 from core.base_module import BaseModule
 from core.wallet_manager import Wallet, Chain, TransactionResult
+from core.nonce_manager import NonceManager
 from config.settings import SETTINGS
 from web3 import Web3
 from utils.logger import log_transaction_start, log_transaction_success, log_transaction_error, log_status
@@ -9,8 +10,8 @@ from config.constants import *
 
 
 class SuperBridgeModule(BaseModule):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nonce_manager: NonceManager):
+        super().__init__(nonce_manager)
         self.w3 = Web3(Web3.HTTPProvider(SETTINGS["RPC_URL"]))
         self.settings = SETTINGS["SUPERBRIDGE"]
         self.headers = {
@@ -140,10 +141,12 @@ class SuperBridgeModule(BaseModule):
                 "to": self.w3.to_checksum_address(tx_data["to"]),
                 "data": tx_data["data"],
                 "value": int(tx_data["value"]),
-                "nonce": self.w3.eth.get_transaction_count(wallet.address),
                 "gasPrice": self.w3.eth.gas_price,
                 "chainId": self.w3.eth.chain_id
             }
+
+            # Получаем nonce через NonceManager
+            transaction = self.prepare_transaction(wallet, transaction)
 
             # Оценка газа
             estimated_gas = bridge_data["steps"][0]["estimatedGasLimit"]
@@ -151,33 +154,39 @@ class SuperBridgeModule(BaseModule):
 
             log_status(wallet_number, "Signing and sending SuperBridge transaction")
 
-            # Подписываем и отправляем транзакцию
-            signed_tx = self.w3.eth.account.sign_transaction(transaction, wallet.private_key)
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            try:
+                # Подписываем и отправляем транзакцию
+                signed_tx = self.w3.eth.account.sign_transaction(transaction, wallet.private_key)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-            log_status(
-                wallet_number,
-                f"Bridging {amount_to_bridge:.6f} ETH to {destination_chain.name}"
-            )
-
-            # Ждем подтверждения
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-
-            if receipt["status"] == 1:
-                log_transaction_success(wallet_number, tx_hash.hex(), "SuperBridge transaction")
-                return TransactionResult(
-                    success=True,
-                    tx_hash=tx_hash.hex(),
-                    module_name=self.module_name
+                log_status(
+                    wallet_number,
+                    f"Bridging {amount_to_bridge:.6f} ETH to {destination_chain.name}"
                 )
-            else:
-                log_transaction_error(wallet_number, "Transaction failed", "SuperBridge transaction")
-                return TransactionResult(
-                    success=False,
-                    tx_hash=tx_hash.hex(),
-                    error_message="Transaction failed",
-                    module_name=self.module_name
-                )
+
+                # Ждем подтверждения
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+
+                if receipt["status"] == 1:
+                    log_transaction_success(wallet_number, tx_hash.hex(), "SuperBridge transaction")
+                    return TransactionResult(
+                        success=True,
+                        tx_hash=tx_hash.hex(),
+                        module_name=self.module_name
+                    )
+                else:
+                    self.handle_failed_transaction(wallet, transaction)
+                    log_transaction_error(wallet_number, "Transaction failed", "SuperBridge transaction")
+                    return TransactionResult(
+                        success=False,
+                        tx_hash=tx_hash.hex(),
+                        error_message="Transaction failed",
+                        module_name=self.module_name
+                    )
+
+            except Exception as e:
+                self.handle_failed_transaction(wallet, transaction)
+                raise e
 
         except Exception as e:
             error_message = str(e)

@@ -5,40 +5,19 @@ from web3 import Web3
 from typing import List
 from core.wallet_manager import Chain, Wallet, TransactionResult
 from core.base_module import BaseModule
+from core.nonce_manager import NonceManager
 from utils.logger import log_transaction_start, log_transaction_success, log_transaction_error, log_status
 from config.settings import SETTINGS
 from config.constants import *
 
 
 class RelayBridge(BaseModule):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nonce_manager: NonceManager):
+        super().__init__(nonce_manager)
         self.w3 = Web3(Web3.HTTPProvider(SETTINGS["RPC_URL"]))
         self.settings = SETTINGS["RELAY_BRIDGE"]
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
-
-    def get_available_chains(self, wallet_number: int = None, proxy: dict = None) -> List[Chain]:
-        response = self.session.get(API_ENDPOINTS["RELAY"]["CHAINS"], proxies=proxy)
-        data = response.json()
-
-        chains = []
-        for chain_data in data["chains"]:
-            if not chain_data.get("disabled", False):
-                chain = Chain(
-                    id=int(chain_data["id"]),
-                    name=chain_data["name"],
-                    rpc_url=chain_data["httpRpcUrl"],
-                    currency_address=chain_data["currency"]["address"],
-                    is_enabled=not chain_data.get("disabled", False),
-                    supports_deposits=chain_data.get("depositEnabled", True)
-                )
-                chains.append(chain)
-
-        return [chain for chain in chains
-                if chain.is_enabled
-                and chain.supports_deposits
-                and chain.id != API_ENDPOINTS["RELAY"]["ORIGIN_CHAIN_ID"]]
 
     def _prepare_transaction_data(self, quote_data: dict, wallet: Wallet) -> dict:
         """Подготовка данных транзакции"""
@@ -48,29 +27,9 @@ class RelayBridge(BaseModule):
             'to': self.w3.to_checksum_address(tx_data['to']),
             'maxFeePerGas': int(tx_data['maxFeePerGas']),
             'maxPriorityFeePerGas': int(tx_data['maxPriorityFeePerGas']),
-            'nonce': self.w3.eth.get_transaction_count(wallet.address)
+            'from': wallet.address
         })
         return tx_data
-
-    def _monitor_transaction(self, tx_hash: str, request_id: str, wallet_number: int) -> bool:
-        """Мониторинг статуса транзакции"""
-        for attempt in range(self.settings["MAX_STATUS_CHECKS"]):
-            log_status(wallet_number, f"Checking Relay transaction status (attempt {attempt + 1}/{self.settings['MAX_STATUS_CHECKS']})")
-            status_data = self._check_transaction_status(request_id)
-
-            if status_data["status"] == "success":
-                log_transaction_success(wallet_number, tx_hash, "Relay bridge transaction")
-                return True
-            elif status_data["status"] == "failed":
-                log_transaction_error(wallet_number, f"Transaction failed: {tx_hash}", "Relay bridge transaction")
-                return False
-            else:
-                log_status(wallet_number, f"Current status: {status_data['status']}. Waiting...")
-
-            time.sleep(self.settings["STATUS_CHECK_DELAY"])
-
-        log_transaction_error(wallet_number, f"Transaction status check timeout after {self.settings['MAX_STATUS_CHECKS']} attempts: {tx_hash}")
-        return False
 
     def process_transaction(self, wallet: Wallet, destination_chain: Chain, amount: dict,
                             wallet_number: int) -> TransactionResult:
@@ -101,23 +60,77 @@ class RelayBridge(BaseModule):
             tx_data = self._prepare_transaction_data(quote_data, wallet)
             request_id = quote_data["steps"][0]["requestId"]
 
+            # Получаем nonce через NonceManager
+            tx_data = self.prepare_transaction(wallet, tx_data)
+
             log_status(wallet_number, "Signing and sending Relay transaction")
-            signed_tx = self.w3.eth.account.sign_transaction(tx_data, wallet.private_key)
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-            log_status(wallet_number, "Monitoring transaction status")
-            success = self._monitor_transaction(tx_hash.hex(), request_id, wallet_number)
+            try:
+                signed_tx = self.w3.eth.account.sign_transaction(tx_data, wallet.private_key)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-            return TransactionResult(
-                success=success,
-                tx_hash=tx_hash.hex(),
-                module_name=self.module_name
-            )
+                log_status(wallet_number, "Monitoring transaction status")
+                success = self._monitor_transaction(tx_hash.hex(), request_id, wallet_number)
+
+                if not success:
+                    self.handle_failed_transaction(wallet, tx_data)
+
+                return TransactionResult(
+                    success=success,
+                    tx_hash=tx_hash.hex(),
+                    module_name=self.module_name
+                )
+
+            except Exception as e:
+                self.handle_failed_transaction(wallet, tx_data)
+                raise e
 
         except Exception as e:
             error_message = str(e)
             log_transaction_error(wallet_number, error_message, "Relay bridge transaction")
             return TransactionResult(False, error_message=error_message, module_name=self.module_name)
+
+    def get_available_chains(self, wallet_number: int = None, proxy: dict = None) -> List[Chain]:
+        response = self.session.get(API_ENDPOINTS["RELAY"]["CHAINS"], proxies=proxy)
+        data = response.json()
+
+        chains = []
+        for chain_data in data["chains"]:
+            if not chain_data.get("disabled", False):
+                chain = Chain(
+                    id=int(chain_data["id"]),
+                    name=chain_data["name"],
+                    rpc_url=chain_data["httpRpcUrl"],
+                    currency_address=chain_data["currency"]["address"],
+                    is_enabled=not chain_data.get("disabled", False),
+                    supports_deposits=chain_data.get("depositEnabled", True)
+                )
+                chains.append(chain)
+
+        return [chain for chain in chains
+                if chain.is_enabled
+                and chain.supports_deposits
+                and chain.id != API_ENDPOINTS["RELAY"]["ORIGIN_CHAIN_ID"]]
+
+    def _monitor_transaction(self, tx_hash: str, request_id: str, wallet_number: int) -> bool:
+        """Мониторинг статуса транзакции"""
+        for attempt in range(self.settings["MAX_STATUS_CHECKS"]):
+            log_status(wallet_number, f"Checking Relay transaction status (attempt {attempt + 1}/{self.settings['MAX_STATUS_CHECKS']})")
+            status_data = self._check_transaction_status(request_id)
+
+            if status_data["status"] == "success":
+                log_transaction_success(wallet_number, tx_hash, "Relay bridge transaction")
+                return True
+            elif status_data["status"] == "failed":
+                log_transaction_error(wallet_number, f"Transaction failed: {tx_hash}", "Relay bridge transaction")
+                return False
+            else:
+                log_status(wallet_number, f"Current status: {status_data['status']}. Waiting...")
+
+            time.sleep(self.settings["STATUS_CHECK_DELAY"])
+
+        log_transaction_error(wallet_number, f"Transaction status check timeout after {self.settings['MAX_STATUS_CHECKS']} attempts: {tx_hash}")
+        return False
 
     def _check_transaction_status(self, request_id: str, wallet_number: int = None, proxy: dict = None) -> dict:
         """Проверка статуса транзакции"""

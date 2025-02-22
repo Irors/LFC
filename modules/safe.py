@@ -1,5 +1,6 @@
 from core.base_module import BaseModule
 from core.wallet_manager import Wallet, Chain, TransactionResult
+from core.nonce_manager import NonceManager
 from config.settings import SETTINGS
 from web3 import Web3
 from utils.logger import log_transaction_start, log_transaction_success, log_transaction_error, log_status
@@ -8,8 +9,8 @@ from config.constants import *
 
 
 class SafeModule(BaseModule):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nonce_manager: NonceManager):
+        super().__init__(nonce_manager)
         self.w3 = Web3(Web3.HTTPProvider(RPC_URL))
         self.settings = SETTINGS
         self.contract = self.w3.eth.contract(
@@ -30,10 +31,10 @@ class SafeModule(BaseModule):
         ]
 
     def process_transaction(self, wallet: Wallet, destination_chain: Chain, amount: dict, wallet_number: int) -> TransactionResult:
-        # try:
+        try:
             log_transaction_start(wallet_number, "Creating Safe transaction")
 
-            # Генерируем случайный nonce
+            # Генерируем случайный nonce для контракта Safe (не путать с nonce транзакции)
             random_nonce = random.randint(
                 self.settings["SAFE"]["NONCE_RANGE"]["MIN"],
                 self.settings["SAFE"]["NONCE_RANGE"]["MAX"]
@@ -48,44 +49,52 @@ class SafeModule(BaseModule):
                 random_nonce
             ).build_transaction({
                 "from": wallet.address,
-                "nonce": self.w3.eth.get_transaction_count(wallet.address),
                 "gasPrice": self.w3.eth.gas_price,
                 "chainId": self.w3.eth.chain_id
             })
+
+            # Получаем nonce через NonceManager
+            tx = self.prepare_transaction(wallet, tx)
 
             # Оценка газа
             tx["gas"] = int(self.w3.eth.estimate_gas(tx) * 1.5)
 
             log_status(wallet_number, "Signing and sending Safe transaction")
 
-            # Подписываем и отправляем транзакцию
-            signed_tx = self.w3.eth.account.sign_transaction(tx, wallet.private_key)
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            try:
+                # Подписываем и отправляем транзакцию
+                signed_tx = self.w3.eth.account.sign_transaction(tx, wallet.private_key)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-            # Ждем подтверждения
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+                # Ждем подтверждения
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
 
-            if receipt["status"] == 1:
-                log_transaction_success(wallet_number, tx_hash.hex(), "Safe deployment")
-                return TransactionResult(
-                    success=True,
-                    tx_hash=tx_hash.hex(),
-                    module_name=self.module_name
-                )
-            else:
-                log_transaction_error(wallet_number, "Transaction failed", "Safe deployment")
-                return TransactionResult(
-                    success=False,
-                    tx_hash=tx_hash.hex(),
-                    error_message="Transaction failed",
-                    module_name=self.module_name
-                )
+                if receipt["status"] == 1:
+                    log_transaction_success(wallet_number, tx_hash.hex(), "Safe deployment")
+                    return TransactionResult(
+                        success=True,
+                        tx_hash=tx_hash.hex(),
+                        module_name=self.module_name
+                    )
+                else:
+                    self.handle_failed_transaction(wallet, tx)
+                    log_transaction_error(wallet_number, "Transaction failed", "Safe deployment")
+                    return TransactionResult(
+                        success=False,
+                        tx_hash=tx_hash.hex(),
+                        error_message="Transaction failed",
+                        module_name=self.module_name
+                    )
 
-        # except Exception as e:
-        #     error_message = str(e)
-        #     log_transaction_error(wallet_number, error_message, "Safe deployment")
-        #     return TransactionResult(
-        #         success=False,
-        #         error_message=error_message,
-        #         module_name=self.module_name
-        #     )
+            except Exception as e:
+                self.handle_failed_transaction(wallet, tx)
+                raise e
+
+        except Exception as e:
+            error_message = str(e)
+            log_transaction_error(wallet_number, error_message, "Safe deployment")
+            return TransactionResult(
+                success=False,
+                error_message=error_message,
+                module_name=self.module_name
+            )

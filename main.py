@@ -15,7 +15,8 @@ from modules.jumper import JumperModule
 from modules.layer_swap import LayerSwapModule
 from modules.superbridge import SuperBridgeModule
 from modules.weth import WethModule
-
+from core.nonce_manager import NonceManager
+from web3 import Web3
 from utils.logger import setup_logging, log_module_start
 from utils.results_tracker import ResultsTracker
 
@@ -26,17 +27,21 @@ class DeFiBot:
         self.wallet_counter = 0
         self.wallet_count_lock = threading.Lock()
         self.results_tracker = ResultsTracker()
-        self.weth_module = WethModule()
 
-        # Инициализация модулей
+        # Инициализация Web3 и NonceManager
+        self.w3 = Web3(Web3.HTTPProvider(SETTINGS["RPC_URL"]))
+        self.nonce_manager = NonceManager(self.w3)
+
+        # Инициализация модулей с передачей nonce_manager
+        self.weth_module = WethModule(self.nonce_manager)
         self.modules = [
-            DmailModule(),
-            RelayBridge(),
-            IonicModule(),
-            SafeModule(),
-            JumperModule(),
-            LayerSwapModule(),
-            SuperBridgeModule()
+            DmailModule(self.nonce_manager),
+            RelayBridge(self.nonce_manager),
+            IonicModule(self.nonce_manager),
+            SafeModule(self.nonce_manager),
+            JumperModule(self.nonce_manager),
+            LayerSwapModule(self.nonce_manager),
+            SuperBridgeModule(self.nonce_manager)
         ]
 
     def get_wallet_number(self) -> int:

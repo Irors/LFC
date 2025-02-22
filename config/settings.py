@@ -4,11 +4,12 @@ SETTINGS = {
     "RPC_URL": "https://lisk.drpc.org",
     "CHAIN_ID": 1135,
     "BETWEEN_START_WALLETS": {
-            "MIN": 10,
-            "MAX": 90
+            "MIN": 30,
+            "MAX": 222
         },
+    'PRICE_ETH': 2800,  # резервное значение на случай если API выдаст ошибку
 
-    "MAX_THREADS": 5,
+    "MAX_THREADS": 3,
     "DELAYS": {
         "BETWEEN_WALLETS": {
             "MIN": 66,
@@ -20,7 +21,7 @@ SETTINGS = {
         },
         "BETWEEN_TRANSACTIONS": {
             "MIN": 3,
-            "MAX": 8
+            "MAX": 10
         }
     },
 
@@ -37,7 +38,7 @@ SETTINGS = {
     "RELAY_BRIDGE": {
         "AMOUNT_PERCENTAGE": {
             "MIN": 0.01,
-            "MAX": 0.01
+            "MAX": 0.03
         },
         "SLIPPAGE": "",
         "GAS_LIMIT": random.randint(500000, 550000),
@@ -48,7 +49,7 @@ SETTINGS = {
     "DMAIL": {
         "MESSAGE_COUNT": {
             "MIN": 1,
-            "MAX": 1
+            "MAX": 2
         }
     },
 
@@ -63,7 +64,7 @@ SETTINGS = {
         "API_KEY": "qLdBchGbu9A1VFBEHzbGlEL5usPcjcGCzJlmCbcNXlh7jEMxWpseM4CNCi97HDEk9LUBPYwFJl+HuC3EpzDCrA",
         "AMOUNT_PERCENTAGE": {
             "MIN": 0.01,
-            "MAX": 0.02
+            "MAX": 0.03
         },
         "TO_CHAIN": {
             "arbitrum": "ARBITRUM_MAINNET",
@@ -81,7 +82,7 @@ SETTINGS = {
     "SUPERBRIDGE": {
         "AMOUNT_PERCENTAGE": {
             "MIN": 0.01,
-            "MAX": 0.01
+            "MAX": 0.03
         }
     },
 
@@ -91,7 +92,7 @@ SETTINGS = {
         "SPENDER_ADDRESS": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
         "AMOUNT_PERCENTAGE": {
             "MIN": 0.01,
-            "MAX": 0.01
+            "MAX": 0.03
         },
     },
 
@@ -100,7 +101,7 @@ SETTINGS = {
             "USDT": {
                 "ADDRESS": "0x05D032ac25d322df992303dCa074EE7392C117b9",
                 "MIN_AMOUNT": 0.01,
-                "MAX_AMOUNT": 0.01,
+                "MAX_AMOUNT": 0.03,
                 "SUPPLY_CONTRACT": "0x0D72f18BC4b4A2F0370Af6D799045595d806636F"
             }
         },

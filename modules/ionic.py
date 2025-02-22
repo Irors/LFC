@@ -1,5 +1,6 @@
 from core.base_module import BaseModule
 from core.wallet_manager import Wallet, Chain, TransactionResult
+from core.nonce_manager import NonceManager
 from config.settings import SETTINGS
 from web3 import Web3
 from utils.logger import log_transaction_start, log_transaction_success, log_transaction_error, log_status
@@ -8,8 +9,8 @@ from config.constants import *
 
 
 class IonicModule(BaseModule):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nonce_manager: NonceManager):
+        super().__init__(nonce_manager)
         self.w3 = Web3(Web3.HTTPProvider(RPC_URL))
         self.settings = SETTINGS["IONIC"]
 
@@ -66,23 +67,31 @@ class IonicModule(BaseModule):
                 amount * 18**10
             ).build_transaction({
                 "from": wallet.address,
-                "nonce": self.w3.eth.get_transaction_count(wallet.address),
                 "gasPrice": self.w3.eth.gas_price,
                 "chainId": self.w3.eth.chain_id
             })
 
+            # Получаем nonce через NonceManager
+            tx = self.prepare_transaction(wallet, tx)
+
             tx["gas"] = int(self.w3.eth.estimate_gas(tx) * 1.5)
-            signed_tx = self.w3.eth.account.sign_transaction(tx, wallet.private_key)
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+            try:
+                signed_tx = self.w3.eth.account.sign_transaction(tx, wallet.private_key)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
 
-            if receipt["status"] == 1:
-                log_transaction_success(wallet_number, tx_hash.hex(), "Token approval for Ionic")
-                return True
-            else:
-                log_transaction_error(wallet_number, "Token approval failed", "Ionic approval")
-                return False
+                if receipt["status"] == 1:
+                    log_transaction_success(wallet_number, tx_hash.hex(), "Token approval for Ionic")
+                    return True
+                else:
+                    self.handle_failed_transaction(wallet, tx)
+                    log_transaction_error(wallet_number, "Token approval failed", "Ionic approval")
+                    return False
+
+            except Exception as e:
+                self.handle_failed_transaction(wallet, tx)
+                raise e
 
         except Exception as e:
             log_transaction_error(wallet_number, str(e), "Ionic approval")
@@ -110,15 +119,8 @@ class IonicModule(BaseModule):
                 abi=self.settings["ABI"]["SUPPLY"]
             )
 
-            for token_symbol, token_data in self.settings["TOKENS"].items():
-                token_contract = self.w3.eth.contract(
-                    address=self.w3.to_checksum_address(token_data["ADDRESS"]),
-                    abi=self.settings["ABI"]["TOKEN"]
-                )
-
-            balance = self.check_token_balance(wallet, token_data["ADDRESS"], token_contract)
-
             # Определяем сумму для supply
+            balance = token["balance"]
             supply_amount = int(random.uniform(
                 balance * token["data"]["MIN_AMOUNT"],
                 balance * min(token["data"]["MAX_AMOUNT"], token["balance"])
@@ -148,35 +150,44 @@ class IonicModule(BaseModule):
                 supply_amount
             ).build_transaction({
                 "from": wallet.address,
-                "nonce": self.w3.eth.get_transaction_count(wallet.address),
                 "gasPrice": self.w3.eth.gas_price,
                 "chainId": self.w3.eth.chain_id
             })
 
+            # Получаем nonce через NonceManager
+            tx = self.prepare_transaction(wallet, tx)
+
             tx["gas"] = int(self.w3.eth.estimate_gas(tx) * 1.5)
-            signed_tx = self.w3.eth.account.sign_transaction(tx, wallet.private_key)
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-            log_status(wallet_number, "Waiting for Ionic supply transaction confirmation")
+            try:
+                signed_tx = self.w3.eth.account.sign_transaction(tx, wallet.private_key)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-            # Ждем подтверждения транзакции
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+                log_status(wallet_number, "Waiting for Ionic supply transaction confirmation")
 
-            if receipt["status"] == 1:
-                log_transaction_success(wallet_number, tx_hash.hex(), "Ionic supply")
-                return TransactionResult(
-                    success=True,
-                    tx_hash=tx_hash.hex(),
-                    module_name=self.module_name
-                )
-            else:
-                log_transaction_error(wallet_number, "Transaction failed", "Ionic supply")
-                return TransactionResult(
-                    success=False,
-                    tx_hash=tx_hash.hex(),
-                    error_message="Transaction failed",
-                    module_name=self.module_name
-                )
+                # Ждем подтверждения транзакции
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+
+                if receipt["status"] == 1:
+                    log_transaction_success(wallet_number, tx_hash.hex(), "Ionic supply")
+                    return TransactionResult(
+                        success=True,
+                        tx_hash=tx_hash.hex(),
+                        module_name=self.module_name
+                    )
+                else:
+                    self.handle_failed_transaction(wallet, tx)
+                    log_transaction_error(wallet_number, "Transaction failed", "Ionic supply")
+                    return TransactionResult(
+                        success=False,
+                        tx_hash=tx_hash.hex(),
+                        error_message="Transaction failed",
+                        module_name=self.module_name
+                    )
+
+            except Exception as e:
+                self.handle_failed_transaction(wallet, tx)
+                raise e
 
         except Exception as e:
             error_message = str(e)
